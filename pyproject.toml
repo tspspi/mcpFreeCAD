@@ -1,0 +1,43 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "setuptools-git-versioning",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcpfreecad"
+dynamic = ["version"]
+requires-python = ">= 3.11"
+description = "MCP server for controlling a running FreeCAD session"
+readme = "README.md"
+authors = [
+    { name = "Thomas Spielauer", email = "pypipackages01@tspi.at" }
+]
+dependencies = [
+    "mcp >= 1.0.0",
+    "pydantic > 2.5.0",
+    "argon2-cffi>=23.1.0"
+]
+
+[project.optional-dependencies]
+remote = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.24.0"
+]
+
+[project.scripts]
+mcpfreecad = "mcpfreecad.app.server:run_mcp_server"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mcpfreecad*"]
+
+[tool.setuptools-git-versioning]
+enabled = true
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests"
+]

@@ -1,0 +1,77 @@
+#!/bin/sh
+#
+# PROVIDE: mcpfreecad
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+#
+# Add the following to /etc/rc.conf or /etc/rc.conf.local:
+#
+# mcpfreecad_enable="YES"
+# mcpfreecad_config="/usr/local/etc/mcpfreecad.conf"
+# mcpfreecad_daemon_user=""
+#
+# Optional overrides:
+#
+# mcpfreecad_command="/usr/local/bin/mcpfreecad"
+# mcpfreecad_transport="remotehttp"
+# mcpfreecad_flags=""
+# mcpfreecad_pidfile="/var/run/mcpfreecad.pid"
+
+. /etc/rc.subr
+
+name="mcpfreecad"
+rcvar="${name}_enable"
+
+load_rc_config "$name"
+
+: ${mcpfreecad_enable:="NO"}
+: ${mcpfreecad_command:="/usr/local/bin/mcpfreecad"}
+: ${mcpfreecad_config:="/usr/local/etc/mcpfreecad.conf"}
+: ${mcpfreecad_transport:="remotehttp"}
+: ${mcpfreecad_pidfile:="/var/run/${name}.pid"}
+: ${mcpfreecad_flags:=""}
+
+# Keep user switching inside daemon(8) itself. rc.subr also has a ${name}_user
+# knob, but letting rc.subr wrap daemon in su(1) would double-apply the user
+# transition when command_args already contains daemon -u.
+: ${mcpfreecad_daemon_user:="${mcpfreecad_user}"}
+unset mcpfreecad_user
+
+pidfile="${mcpfreecad_pidfile}"
+procname="${mcpfreecad_command}"
+command="/usr/sbin/daemon"
+command_interpreter="/bin/sh"
+start_precmd="${name}_prestart"
+stop_postcmd="${name}_poststop"
+required_files="${mcpfreecad_command} ${mcpfreecad_config}"
+
+if [ -n "${mcpfreecad_daemon_user}" ]; then
+    mcpfreecad_daemon_user_args="-u ${mcpfreecad_daemon_user}"
+else
+    mcpfreecad_daemon_user_args=""
+fi
+
+command_args="-p ${pidfile} -t ${name} ${mcpfreecad_daemon_user_args} ${mcpfreecad_command} --config ${mcpfreecad_config} --transport ${mcpfreecad_transport} ${mcpfreecad_flags}"
+
+mcpfreecad_prestart()
+{
+    local pid_dir
+
+    pid_dir=$(dirname "${pidfile}")
+    if [ -d "${pid_dir}" ]; then
+        return 0
+    fi
+
+    if [ -n "${mcpfreecad_daemon_user}" ]; then
+        install -d -o "${mcpfreecad_daemon_user}" "${pid_dir}"
+    else
+        install -d "${pid_dir}"
+    fi
+}
+
+mcpfreecad_poststop()
+{
+    rm -f "${pidfile}"
+}
+
+run_rc_command "$1"
