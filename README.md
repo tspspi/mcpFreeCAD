@@ -16,6 +16,12 @@ The server is designed around a small Python bridge that is loaded into FreeCAD'
 
 For LLM-facing operating guidance, see `LLM_USAGE.md`.
 
+## Further Information
+
+There is an accompanying [blog article](https://www.tspi.at/2026/08/06/llmfreecad.html) that describes some of the usage and motivation behind this project.
+
+![Obligatory comic drawing](https://raw.githubusercontent.com/tspspi/mcpFreeCAD/refs/heads/master/docs/_media/llmcad001.png)
+
 ## Installation
 
 Install from PyPI:
