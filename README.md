@@ -9,12 +9,15 @@ The server is designed around a small Python bridge that is loaded into FreeCAD'
 - `stdio` and API-key authenticated `remotehttp` transports
 - document lifecycle tools for opening, saving, closing, and enumerating FreeCAD documents
 - explicit model inspection via document tree, topology, sketch status, and sketch details tools
+- deferred bridge restart and listener recovery without recreating the GUI dispatcher
 - modeling support for Part primitives, PartDesign bodies/pads/pockets, spreadsheets, Draft arrays, and snapshots
+- dimensioned TechDraw sheets, sections, details, pitch circles, drawing validation and inline image/SVG/PDF delivery
+- compact topology summaries and non-destructive assembly pose/clearance validation
 - reusable object library backed by BREP plus JSON metadata
 - optional workbench integration for helpers such as `freecad.gears`, Fasteners, Curves sketch-on-surface workflows, and A2plus assembly operations when available
 - remote snapshot retrieval through authenticated URLs or tokenized snapshot download URLs
 
-For LLM-facing operating guidance, see `LLM_USAGE.md`.
+For LLM-facing operating guidance, see [the design skill](skill/freecad-mcp-design/SKILL.md) and [the TechDraw skill](skill/freecad-mcp-techdraw/SKILL.md).
 
 ## Further Information
 
@@ -23,6 +26,8 @@ There is an accompanying [blog article](https://www.tspi.at/2026/08/06/llmfreeca
 ![Obligatory comic drawing](https://raw.githubusercontent.com/tspspi/mcpFreeCAD/refs/heads/master/docs/_media/llmcad001.png)
 
 ## Installation
+
+The server uses the MCP Python SDK 2 API and requires Python 3.11 or newer.
 
 Install from PyPI:
 
@@ -58,7 +63,7 @@ Example bridge loading from a checkout:
 exec(open("/path/to/mcpFreeCAD/examples/freecad_bridge_loader.py").read(), globals(), globals())
 ```
 
-The loader starts the bridge on `127.0.0.1:48111` with token `change-me`. Adjust the example or call `start_bridge_server(...)` directly if you need different values.
+By default, the loader starts the bridge on `127.0.0.1:48111` with token `change-me`. Set `MCPFREECAD_CONFIG` to read explicit bridge settings from a configuration file, or call `start_bridge_server(...)` directly. `restart_bridge_server` requires code-execution permission and schedules the restart after the current response.
 
 ## Configuration
 
@@ -142,10 +147,13 @@ The remote HTTP wrapper accepts:
 
 ## Reverse Proxy Notes
 
-The FastMCP instance is created with:
+The MCP 2 SDK Streamable HTTP application is created with:
 
 ```python
-TransportSecuritySettings(enable_dns_rebinding_protection=False)
+server.streamable_http_app(
+    streamable_http_path="/",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 ```
 
 That is intentional for reverse-proxy deployments.
@@ -211,6 +219,27 @@ mcpfreecad_transport="remotehttp"
 mcpfreecad_flags=""
 mcpfreecad_pidfile="/var/run/mcpfreecad.pid"
 ```
+
+## Technical Drawings
+
+After CAD geometry is validated, the recommended workflow includes dimensioned
+TechDraw documentation before manufacturing preparation. The tools support
+metric A4..A0 sheet presets, orthographic and isometric views, sections, details,
+measured dimensions, annotations and inspected hole pitch circles.
+
+`render_techdraw_page` returns an inline MCP image, so a client can inspect the
+drawing without access to FreeCAD's files. `export_techdraw_drawing` delivers
+SVG or PDF bytes with size and SHA-256 metadata. Rendering and exports require
+snapshot permission and the FreeCAD GUI.
+
+Run `check_techdraw_conformance`, read its findings and coverage gaps, then
+inspect the MCP image. Save/reopen and recheck the measurements before delivery.
+Disable editing frames with `set_techdraw_view_frames(enabled=false)` when edits
+are finished. These checks assist review; they do not certify a complete
+manufacturing specification or standards conformance.
+
+See [TechDraw tools and limitations](docs/techdraw.md) and the
+[TechDraw skill](skill/freecad-mcp-techdraw/SKILL.md).
 
 ## Optional Workbenches
 

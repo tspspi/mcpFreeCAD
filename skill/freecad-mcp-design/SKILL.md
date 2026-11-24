@@ -151,6 +151,20 @@ Use the cheapest reliable check first:
 
 For movable assemblies, inspect at least the limiting or critical poses rather than only the neutral pose. Where motion tools are unavailable, calculate and instantiate representative transformed copies or envelopes.
 
+## Drawing handoff
+
+After CAD geometry and mechanical checks pass, the standard recommended next
+step is a dimensioned technical drawing before manufacturing preparation. Use
+`freecad-mcp-techdraw` and its
+[drawing procedures](../freecad-mcp-techdraw/SKILL.md). Identify independent
+finished parts, select the necessary views/sections and account for each
+functional feature's size, location, depth and intended specification.
+
+Run the drawing checker and inspect its MCP image; correct defects and verify
+the saved/reopened references. Keep unresolved materials, fits, tolerances and
+approvals explicit. A geometry change invalidates affected drawing evidence.
+Respect a model-only deliverable or an explicit request to stop earlier.
+
 ## Completion criteria
 
 Do not report the design as complete until:
@@ -165,6 +179,7 @@ Do not report the design as complete until:
 - expensive detailed geometry was postponed until needed
 - every part received an isometric and at least one useful orthographic visual inspection
 - the assembly received a controlled visual inspection
+- dimensioned TechDraw documentation was checked and visually reviewed after CAD validation, or explicitly excluded by the requested scope
 - the document was saved when requested
 
 Report assumptions, unresolved risks, skipped expensive checks, and any geometry represented by simplified proxies.

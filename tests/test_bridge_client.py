@@ -1,4 +1,5 @@
 import json
+import pytest
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -71,3 +72,20 @@ def test_bridge_client_auth_failure():
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.parametrize("failure", [TimeoutError("stalled body"),
+    ConnectionResetError("closed body"), b"not JSON", b"\xff", b"[]"])
+def test_response_body_failures_are_bridge_errors(monkeypatch, failure):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    @contextmanager
+    def opened(*args, **kwargs):
+        def read():
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+        yield SimpleNamespace(read=read)
+    monkeypatch.setattr("urllib.request.urlopen", opened)
+    with pytest.raises(BridgeError):
+        FreeCADBridgeClient(BridgeConfig()).status()

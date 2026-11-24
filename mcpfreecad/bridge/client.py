@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional
@@ -48,12 +49,21 @@ class FreeCADBridgeClient:
             return {}
         return {"Authorization": f"Bearer {self._config.token}"}
 
-    def _json_request(self, request: urllib.request.Request) -> Dict[str, Any]:
+    def _json_request(self, request: urllib.request.Request, timeout_seconds: Optional[float] = None) -> Dict[str, Any]:
+        effective_timeout = float(timeout_seconds if timeout_seconds is not None else self._config.timeout_seconds)
         try:
-            with urllib.request.urlopen(request, timeout=self._config.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
+            with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise BridgeError("FreeCAD bridge response must be a JSON object")
+                return payload
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            except (OSError, http.client.HTTPException) as read_error:
+                raise BridgeError(f"HTTP {exc.code}: failed to read FreeCAD bridge response") from read_error
             raise BridgeError(f"HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
             raise BridgeError(f"Failed to reach FreeCAD bridge at {self.base_url}: {exc.reason}") from exc
+        except (OSError, http.client.HTTPException, ValueError, UnicodeError) as exc:
+            raise BridgeError(f"Failed to read FreeCAD bridge response at {self.base_url}: {exc}") from exc

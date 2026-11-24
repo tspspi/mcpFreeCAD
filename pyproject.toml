@@ -16,7 +16,7 @@ authors = [
     { name = "Thomas Spielauer", email = "pypipackages01@tspi.at" }
 ]
 dependencies = [
-    "mcp >= 1.0.0",
+    "mcp >= 2.2.0, < 3",
     "pydantic > 2.5.0",
     "argon2-cffi>=23.1.0"
 ]

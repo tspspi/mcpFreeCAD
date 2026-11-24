@@ -93,18 +93,28 @@ def setup_logging(logging_config: LoggingConfig):
     root.setLevel(level)
 
 
-def get_config(args: Optional[argparse.Namespace] = None) -> Config:
-    global _cached_config
-    if _cached_config is not None:
-        return _cached_config
+def read_config(args: Optional[argparse.Namespace] = None) -> Config:
+    """Read a candidate without changing the running configuration or logging."""
     parsed = args or parse_arguments()
     config = load_config(parsed.config)
     if parsed.logfile:
         config.logging.logfile = parsed.logfile
     if parsed.log_level:
         config.logging.level = parsed.log_level
-    setup_logging(config.logging)
+    return config
+
+
+def set_cached_config(config: Config) -> None:
+    global _cached_config
     _cached_config = config
+
+
+def get_config(args: Optional[argparse.Namespace] = None) -> Config:
+    if _cached_config is not None:
+        return _cached_config
+    config = read_config(args)
+    setup_logging(config.logging)
+    set_cached_config(config)
     return config
 
 

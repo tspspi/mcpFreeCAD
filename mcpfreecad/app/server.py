@@ -1,4 +1,4 @@
-"""CLI entrypoint and FastMCP runners for the mcpfreecad MCP server."""
+"""CLI entrypoint and MCPServer runners for the mcpfreecad MCP server."""
 
 import importlib.util
 import base64
@@ -14,12 +14,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 from mcpfreecad.bridge.client import BridgeError, FreeCADBridgeClient
 from mcpfreecad.config.api_keys import match_api_key
-from mcpfreecad.config.config_manager import generate_and_store_api_key, get_config, parse_arguments, reset_cached_config
+from mcpfreecad.config.config_manager import generate_and_store_api_key, get_config, parse_arguments, read_config, set_cached_config, setup_logging
 from mcpfreecad.config.schema import APIKeyConfig, BridgeConfig, Config
 
 logger = logging.getLogger(__name__)
@@ -160,30 +160,33 @@ def _build_stdio_key_config(config: Config) -> APIKeyConfig:
 
 
 def _apply_new_config_to_state(state: MCPFreeCADServerState, new_config: Config) -> None:
+    stdio_key = _build_stdio_key_config(new_config)
     state.config = new_config
-    state.stdio_key = _build_stdio_key_config(new_config)
+    state.stdio_key = stdio_key
 
 
-def _build_fastmcp_server(config: Config) -> tuple[FastMCP, MCPFreeCADServerState]:
+def _build_fastmcp_server(config: Config) -> tuple[MCPServer, MCPFreeCADServerState]:
     state = MCPFreeCADServerState(config=config, stdio_key=_build_stdio_key_config(config))
 
     @asynccontextmanager
-    async def lifespan(app: FastMCP):
+    async def lifespan(app: MCPServer):
         yield state
 
-    server = FastMCP(
+    server = MCPServer(
         "mcpfreecad",
         lifespan=lifespan,
-        streamable_http_path="/",
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
     _register_tools(server, state)
     return server, state
 
 
-def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
+def _register_tools(server: MCPServer, state: MCPFreeCADServerState) -> None:
     def _key_config(ctx: Context) -> APIKeyConfig:
-        request = getattr(getattr(ctx, "request_context", None), "request", None)
+        try:
+            request_context = ctx.request_context if ctx is not None else None
+        except ValueError:
+            request_context = None
+        request = getattr(request_context, "request", None)
         if request is not None:
             key_from_request = getattr(getattr(request, "state", object()), REQUEST_STATE_KEY, None)
             if key_from_request is not None:
@@ -206,6 +209,9 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
             return _bridge_client().call(command, **params)
         except BridgeError as exc:
             raise RuntimeError(str(exc)) from exc
+
+    from .techdraw_tools import register_techdraw_tools
+    register_techdraw_tools(server, _checked_call)
 
     @server.tool(name="bridge_status", description="Return connectivity and status details for the current FreeCAD bridge.")
     def bridge_status(ctx: Context = None):
@@ -237,11 +243,13 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
             max_depth=max_depth,
         )
 
-    @server.tool(name="get_object_topology", description="Inspect one object's faces, edges, and vertices so callers can choose subelements like Face1 or Edge3 for modeling or assembly constraints.")
+
+    @server.tool(name="get_object_topology", description="Inspect faces/edges/vertices, or use summary_only for compact validity, volume and solid count. A valid shape can contain multiple disconnected solids; verify single_solid for one-piece parts.")
     def get_object_topology(
         object_name: str,
         document_name: Optional[str] = None,
         include_vertices: bool = True,
+        summary_only: bool = False,
         ctx: Context = None,
     ):
         return _checked_call(
@@ -250,7 +258,9 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
             object_name=object_name,
             document_name=document_name,
             include_vertices=include_vertices,
+            summary_only=summary_only,
         )
+
 
     @server.tool(name="get_sketch_status", description="Inspect a sketch's solver state, wire closure, and basic validity before creating downstream features like pads or pockets.")
     def get_sketch_status(
@@ -491,6 +501,7 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
             document_name=document_name,
         )
 
+
     @server.tool(name="create_body", description="Create a PartDesign body and optionally make it the active body in the current document.")
     def create_body(name: Optional[str] = None, activate: bool = True, document_name: Optional[str] = None, ctx: Context = None):
         return _checked_call(ctx, "create_body", name=name, activate=activate, document_name=document_name)
@@ -587,6 +598,17 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
         )
 
     if _a2plus_supported():
+        @server.tool(name="list_a2plus_importable_shapes", description="List the top-level shapes A2plus would offer from an external FCStd or STEP source file, so callers can import by explicit label without triggering the GUI selection dialog.")
+        def list_a2plus_importable_shapes(
+            path: str,
+            ctx: Context = None,
+        ):
+            return _checked_call(
+                ctx,
+                "list_a2plus_importable_shapes",
+                path=path,
+            )
+
         @server.tool(name="import_a2plus_part", description="Import an external FCStd or STEP component into the current assembly document through the optional A2plus workbench.")
         def import_a2plus_part(
             path: str,
@@ -607,6 +629,7 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
                 desired_shape_label=desired_shape_label,
                 fixed_position=fixed_position,
             )
+
 
         @server.tool(name="list_a2plus_parts", description="List A2plus-imported assembly components in the current document, including source file and fixed-position state.")
         def list_a2plus_parts(document_name: Optional[str] = None, ctx: Context = None):
@@ -717,6 +740,7 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
             attachment_offset=attachment_offset,
             placement=placement,
         )
+
 
     @server.tool(name="set_sketch_expression", description="Bind a sketch property or constraint path such as `Constraints[0]` to an expression, for example a spreadsheet alias.")
     def set_sketch_expression(
@@ -918,10 +942,8 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
         orientation: Optional[str] = None,
         ctx: Context = None,
     ):
-        result = _checked_call(
+        return _capture_snapshot_with_recording(
             ctx,
-            "capture_snapshot",
-            require_snapshots=True,
             filename=filename,
             width=width,
             height=height,
@@ -929,19 +951,7 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
             fit_view=fit_view,
             orientation=orientation,
         )
-        request = getattr(getattr(ctx, "request_context", None), "request", None)
-        if request is None:
-            return result
-        key_config = _key_config(ctx)
-        record = _store_snapshot_record(state, result["path"], key_config.id)
-        result["snapshot_id"] = record.snapshot_id
-        result["download_url"] = _snapshot_download_url(state.config, record.snapshot_id)
-        result["download_url_with_token"] = _snapshot_download_url(
-            state.config,
-            record.snapshot_id,
-            access_token=record.access_token,
-        )
-        return result
+
 
     @server.tool(name="get_snapshot_base64", description="Return a previously captured snapshot as a base64-encoded PNG payload.")
     def get_snapshot_base64(snapshot_id: str, ctx: Context = None):
@@ -987,12 +997,44 @@ def _register_tools(server: FastMCP, state: MCPFreeCADServerState) -> None:
         )
 
 
-def _run_stdio_transport(server: FastMCP, state: MCPFreeCADServerState):
+    @server.tool(name="validate_pose_sweep", description="Validate declared allowed-contact and forbidden-clearance interfaces across explicit non-destructive assembly poses. Pose transforms apply only to temporary shape copies.")
+    def validate_pose_sweep(
+        manifest: dict,
+        document_name: Optional[str] = None,
+        ctx: Context = None,
+    ):
+        return _checked_call(
+            ctx,
+            "validate_pose_sweep",
+            manifest=manifest,
+            document_name=document_name,
+        )
+
+
+    @server.tool(name="restart_bridge_server", description="Schedule a deferred restart of the in-process FreeCAD bridge after the current request returns.")
+    def restart_bridge_server(
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        token: Optional[str] = None,
+        delay_seconds: float = 0.1,
+        ctx: Context = None,
+    ):
+        return _checked_call(
+            ctx,
+            "restart_bridge_server",
+            host=host,
+            port=port,
+            token=token,
+            delay_seconds=delay_seconds,
+        )
+
+
+def _run_stdio_transport(server: MCPServer, state: MCPFreeCADServerState):
     logger.info("Starting stdio MCP server with library root %s", state.stdio_key.library_root)
     server.run("stdio")
 
 
-def _run_remote_http_transport(args, config: Config, server: FastMCP, state: MCPFreeCADServerState):
+def _run_remote_http_transport(args, config: Config, server: MCPServer, state: MCPFreeCADServerState):
     remote_config = config.remote_server
     if remote_config is None:
         raise RuntimeError("remotehttp transport selected but remote_server configuration is missing")
@@ -1035,15 +1077,16 @@ def _install_remote_reload_handler(args, state: MCPFreeCADServerState) -> None:
         del signum, frame
         try:
             with state.reload_lock:
-                reset_cached_config()
-                new_config = get_config(args)
+                new_config = read_config(args)
                 if new_config.remote_server is None:
                     logger.error("Reload aborted: remote_server block missing")
                     return
                 if not new_config.api_keys:
                     logger.error("Reload aborted: api_keys section empty")
                     return
+                setup_logging(new_config.logging)
                 _apply_new_config_to_state(state, new_config)
+                set_cached_config(new_config)
         except Exception:
             logger.exception("Failed to reload configuration on SIGHUP")
         else:
@@ -1052,7 +1095,7 @@ def _install_remote_reload_handler(args, state: MCPFreeCADServerState) -> None:
     signal.signal(signal.SIGHUP, _handle_reload)
 
 
-def _build_remote_fastapi_app(server: FastMCP, state: MCPFreeCADServerState):
+def _build_remote_fastapi_app(server: MCPServer, state: MCPFreeCADServerState):
     if state.config.remote_server is None:
         raise RuntimeError("remote transport selected but remote_server config is missing")
 
@@ -1064,7 +1107,10 @@ def _build_remote_fastapi_app(server: FastMCP, state: MCPFreeCADServerState):
     except ImportError as exc:
         raise RuntimeError("Remote HTTP transport requires FastAPI. Install extras via 'pip install mcpfreecad[remote]'") from exc
 
-    mcp_http_app = server.streamable_http_app()
+    mcp_http_app = server.streamable_http_app(
+        streamable_http_path="/",
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
     api_key_query_param = "mcp"
     legacy_query_param = "api_key"
     status_path = "/status"

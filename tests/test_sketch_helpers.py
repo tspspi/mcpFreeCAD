@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from mcpfreecad.freecad.bridge_server import (
     _a2plus_constraint_spec,
@@ -219,6 +220,19 @@ def test_a2plus_constraint_spec_maps_supported_kind():
 
     assert normalized == "plane"
     assert class_name == "PlaneConstraint"
+
+
+def test_shape_summary_distinguishes_valid_multisolid_from_one_piece():
+    for count in (0, 1, 2):
+        shape = SimpleNamespace(Solids=[object()] * count, Faces=[object()] * 100,
+                                Edges=[object()] * 200, Vertexes=[object()] * 50,
+                                Volume=12.0, isValid=lambda: True)
+        result = _serialize_shape_topology(shape, summary_only=True)
+        assert result == {"solid_count": count, "single_solid": count == 1,
+                          "shape_valid": True, "volume": 12.0,
+                          "face_count": 100, "edge_count": 200, "vertex_count": 50}
+    shape.isValid = lambda: False
+    assert _serialize_shape_topology(shape, summary_only=True)["shape_valid"] is False
 
 
 def test_serialize_shape_topology_reports_faces_edges_and_vertices():
